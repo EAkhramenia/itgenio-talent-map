@@ -34,6 +34,7 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
       personnel_type: z.enum(["staff", "trainer", "contractor"]).nullable(), departure_reason: z.enum(["pay", "workload", "management", "growth", "personal", "redundancy", "contract_end", "other"]).nullable(),
       name: z.string().trim().min(1).max(200), email: z.string().trim().email().max(255), position: z.string().trim().max(200),
       department_id: z.string().uuid(), team_id: z.string().uuid().nullable(),
+      team_lead_employee_id: z.string().uuid().nullable(),
       manager_employee_id: z.string().uuid().nullable(), hr_owner_id: z.string().uuid().nullable(),
       start_date: date, currently_working: z.boolean().nullable(), probation_end_date: date, probation_result: z.enum(["passed", "failed", "extended"]).nullable(),
       planned_end_date: date, end_date: date, gena_url: url, notion_url: url,
@@ -42,6 +43,7 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
     const parsed = schema.safeParse({
       personnel_type: opt(f.get("personnel_type")), departure_reason: opt(f.get("departure_reason")),
       name: f.get("name"), email: f.get("email"), position: f.get("position") ?? "", department_id: opt(f.get("department_id")), team_id: opt(f.get("team_id")),
+      team_lead_employee_id: opt(f.get("team_lead_employee_id")),
       manager_employee_id: opt(f.get("manager_employee_id")), hr_owner_id: opt(f.get("hr_owner_id")),
       start_date: startDate, currently_working: startDate ? null : f.get("currently_working") === "yes" ? true : f.get("currently_working") === "no" ? false : null,
       probation_end_date: opt(f.get("probation_end_date")), probation_result: opt(f.get("probation_result")),
@@ -51,9 +53,11 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
     const d = parsed.data;
     if (d.team_id && org.teams.find((t) => t.id === d.team_id)?.department_id !== d.department_id) { toast.error("Команда должна принадлежать выбранному отделу"); return; }
     if (person && d.manager_employee_id === person.id) { toast.error("Сотрудник не может быть своим руководителем"); return; }
+    if (person && d.team_lead_employee_id === person.id) { toast.error("Сотрудник не может быть своим тимлидом"); return; }
     if (org.companyReady && !d.personnel_type) { toast.error("Выберите категорию персонала: сотрудники, тренеры или подрядчики"); return; }
     const { personnel_type, departure_reason, ...basePayload } = d;
     let payload: Record<string, unknown> = org.companyReady ? d : basePayload;
+    if (!org.teamLeadReady) { const { team_lead_employee_id, ...withoutTeamLead } = payload; payload = withoutTeamLead; }
     if (!org.schemaReady) {
       if (!d.start_date) { toast.error("До применения SQL этапа 1 дата выхода обязательна"); return; }
       payload = { name: d.name, email: d.email, position: d.position, team_id: d.team_id, start_date: d.start_date, end_date: d.end_date };
@@ -88,7 +92,8 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
       <PositionPicker value={person?.position ?? ""} positions={org.people.filter(p => !p.archived || p.id === person?.id).map(p => p.position)} />
       <label className="text-sm">Отдел<select name="department_id" required className={`${selectCls} block w-full`} value={deptId} onChange={(e) => setDeptId(e.target.value)}><option value="">Выберите отдел</option>{org.departments.filter((d) => !d.archived || d.id === deptId).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
       <label className="text-sm">Команда (необязательно)<select key={deptId} name="team_id" className={`${selectCls} block w-full`} defaultValue={initialDeptId === deptId ? person?.team_id ?? "" : ""}><option value="">Без команды</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><span className="mt-1 block text-xs text-muted-foreground">{!deptId ? "Сначала выберите отдел. " : teams.length === 0 ? "В этом отделе пока нет команд. " : ""}HR добавляют и переименовывают команды в разделе «Оргструктура».</span></label>
-      <label className="text-sm">Руководитель<select name="manager_employee_id" className={`${selectCls} block w-full`} defaultValue={person?.manager_employee_id ?? ""}><option value="">Не указан</option>{org.people.filter((p) => p.id !== person?.id && (!p.archived || p.id === person?.manager_employee_id)).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+      <label className="text-sm">Руководитель отдела<select name="manager_employee_id" className={`${selectCls} block w-full`} defaultValue={person?.manager_employee_id ?? ""}><option value="">Не указан</option>{org.people.filter((p) => p.id !== person?.id && (!p.archived || p.id === person?.manager_employee_id)).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+      <label className="text-sm">Тимлид (необязательно)<select name="team_lead_employee_id" disabled={!org.teamLeadReady} className={`${selectCls} block w-full`} defaultValue={person?.team_lead_employee_id ?? ""}><option value="">Не указан</option>{org.people.filter(p => p.id !== person?.id && (!p.archived || p.id === person?.team_lead_employee_id)).map(p => <option key={p.id} value={p.id}>{p.name}{p.archived ? " · архив" : ""}</option>)}</select><span className="mt-1 block text-xs text-muted-foreground">{org.teamLeadReady ? "Выберите сотрудника. Эта отметка не выдаёт доступ к системе." : "Для сохранения тимлида примените SQL-файл 2026-11-23_employee_team_lead.sql."}</span></label>
       <label className="text-sm">Ответственный HR<select name="hr_owner_id" className={`${selectCls} block w-full`} defaultValue={person?.hr_owner_id ?? ""}><option value="">Не указан</option>{org.hrOperators.map((p) => <option key={p.id} value={p.id}>{p.display_name || "HR без имени"}</option>)}</select></label>
       {org.companyReady && <label className="text-sm">Категория персонала<select name="personnel_type" required className={`${selectCls} block w-full`} defaultValue={person?.personnel_type ?? ""}><option value="">Выберите категорию</option>{Object.entries(personnelLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}</select><span className="text-xs text-muted-foreground">Сотрудники — без тренеров и подрядчиков</span></label>}
       <label className="text-sm">Дата выхода<Input name="start_date" type="date" defaultValue={person?.start_date ?? ""} /></label>

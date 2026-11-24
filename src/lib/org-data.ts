@@ -10,6 +10,7 @@ export type Person = {
   gena_id?: string | null; gena_source?: { department?: string; team?: string; positions?: string; createdAt?: string } | null; needs_hr_review?: boolean;
   id: string; name: string; email: string; position: string; archived: boolean;
   department_id: string | null; team_id: string | null; category_id: string | null;
+  team_lead_employee_id?: string | null;
   manager_employee_id: string | null; hr_owner_id: string | null; currently_working: boolean | null;
   start_date: string | null; end_date: string | null; probation_end_date: string | null; probation_result: string | null;
   personnel_type: "staff" | "trainer" | "contractor" | null; departure_reason: string | null;
@@ -30,6 +31,8 @@ export function useOrg() {
     const schemaReady = !missing(probe.error);
     const companyProbe = await db.from("employees").select("personnel_type").limit(1);
     const companyReady = !companyProbe.error;
+    const teamLeadProbe = await db.from("employees").select("team_lead_employee_id").limit(1);
+    const teamLeadReady = !teamLeadProbe.error;
     const [people, teams, departments, categories, periods, teamM, deptM, leaves, profiles, roles] = await Promise.all([
       db.from("employees").select("*"), db.from("teams").select("*"), db.from("departments").select("*"), db.from("employee_categories").select("*"),
       db.from("employment_periods").select("*"), db.from("team_memberships").select("*"),
@@ -39,9 +42,9 @@ export function useOrg() {
     ]);
     for (const r of [people, teams, departments, categories, periods, teamM, deptM, leaves]) if (r.error) throw new Error("Не удалось загрузить данные");
     const hrIds = new Set((roles.data ?? []).map((r: { user_id: string }) => r.user_id));
-    const ps = (people.data ?? []).map((p: Partial<Person>) => ({ personnel_type: null, departure_reason: null, department_id: null, manager_employee_id: null, hr_owner_id: null, currently_working: null, probation_end_date: null, probation_result: null, planned_end_date: null, gena_url: null, notion_url: null, ...p })) as Person[];
+    const ps = (people.data ?? []).map((p: Partial<Person>) => ({ personnel_type: null, departure_reason: null, department_id: null, manager_employee_id: null, team_lead_employee_id: null, hr_owner_id: null, currently_working: null, probation_end_date: null, probation_result: null, planned_end_date: null, gena_url: null, notion_url: null, ...p })) as Person[];
     return {
-      schemaReady, companyReady, people: ps, teams: (teams.data ?? []) as Team[], departments: (departments.data ?? []) as Dept[],
+      schemaReady, companyReady, teamLeadReady, people: ps, teams: (teams.data ?? []) as Team[], departments: (departments.data ?? []) as Dept[],
       categories: (categories.data ?? []) as { id: string; name: string }[], periods: (periods.data ?? []) as Period[],
       teamMemberships: (teamM.data ?? []) as Membership[], deptMemberships: (deptM.data ?? []) as Membership[], leaves: (leaves.data ?? []) as LeaveRow[],
       hrOperators: ((profiles.data ?? []) as { id: string; display_name: string }[]).filter((p) => hrIds.has(p.id)),
