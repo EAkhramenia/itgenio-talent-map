@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { PositionPicker } from "@/components/hr/position-picker";
 
+import { FeedbackPanel } from "@/components/hr/employee-feedback";
+
 const opt = (v: FormDataEntryValue | null) => { const s = String(v ?? "").trim(); return s === "" ? null : s; };
 const url = z.string().url().regex(/^https?:\/\//).max(500).nullable();
 const date = z.string().date().nullable();
@@ -19,6 +21,7 @@ const probationLabels: Record<string, string> = { passed: "Пройден", fail
 const allowed = /\.(pdf|doc|docx)$/i;
 
 export function EmployeeCard({ org, person, onClose }: { org: Org; person: Person | null; onClose: () => void }) {
+  const [tab, setTab] = useState<"card" | "feedback">("card");
   const qc = useQueryClient(); const [busy, setBusy] = useState(false);
   const initialDeptId = person?.department_id ?? org.teams.find((t) => t.id === person?.team_id)?.department_id ?? "";
   const [deptId, setDeptId] = useState(initialDeptId);
@@ -30,7 +33,7 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
     const schema = z.object({
       personnel_type: z.enum(["staff", "trainer", "contractor"]).nullable(), departure_reason: z.enum(["pay", "workload", "management", "growth", "personal", "redundancy", "contract_end", "other"]).nullable(),
       name: z.string().trim().min(1).max(200), email: z.string().trim().email().max(255), position: z.string().trim().max(200),
-      department_id: z.string().uuid(), team_id: z.string().uuid().nullable(), category_id: z.string().uuid().nullable(),
+      department_id: z.string().uuid(), team_id: z.string().uuid().nullable(),
       manager_employee_id: z.string().uuid().nullable(), hr_owner_id: z.string().uuid().nullable(),
       start_date: date, currently_working: z.boolean().nullable(), probation_end_date: date, probation_result: z.enum(["passed", "failed", "extended"]).nullable(),
       planned_end_date: date, end_date: date, gena_url: url, notion_url: url,
@@ -39,7 +42,7 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
     const parsed = schema.safeParse({
       personnel_type: opt(f.get("personnel_type")), departure_reason: opt(f.get("departure_reason")),
       name: f.get("name"), email: f.get("email"), position: f.get("position") ?? "", department_id: opt(f.get("department_id")), team_id: opt(f.get("team_id")),
-      category_id: opt(f.get("category_id")), manager_employee_id: opt(f.get("manager_employee_id")), hr_owner_id: opt(f.get("hr_owner_id")),
+      manager_employee_id: opt(f.get("manager_employee_id")), hr_owner_id: opt(f.get("hr_owner_id")),
       start_date: startDate, currently_working: startDate ? null : f.get("currently_working") === "yes" ? true : f.get("currently_working") === "no" ? false : null,
       probation_end_date: opt(f.get("probation_end_date")), probation_result: opt(f.get("probation_result")),
       planned_end_date: opt(f.get("planned_end_date")), end_date: opt(f.get("end_date")), gena_url: opt(f.get("gena_url")), notion_url: opt(f.get("notion_url")),
@@ -53,7 +56,7 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
     let payload: Record<string, unknown> = org.companyReady ? d : basePayload;
     if (!org.schemaReady) {
       if (!d.start_date) { toast.error("До применения SQL этапа 1 дата выхода обязательна"); return; }
-      payload = { name: d.name, email: d.email, position: d.position, team_id: d.team_id, category_id: d.category_id, start_date: d.start_date, end_date: d.end_date };
+      payload = { name: d.name, email: d.email, position: d.position, team_id: d.team_id, start_date: d.start_date, end_date: d.end_date };
     }
     if (person?.gena_id) {
       const reviewed = f.get("hr_reviewed") === "on";
@@ -74,6 +77,9 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
     <Button aria-label="Закрыть" size="icon" variant="ghost" className="absolute right-3 top-3" onClick={onClose}><X className="h-4 w-4" /></Button>
     <h2 className="mb-2 text-xl font-semibold">{person ? person.name : "Новый сотрудник"}</h2>
     {person && <div className="mb-4 flex flex-wrap gap-1">{flags.map((f) => <Pill key={f} tone={f === "probation_decision" ? "warning" : f === "dismissed" ? "destructive" : f === "working" ? "success" : "muted"}>{statusLabels[f]}</Pill>)}{person.archived && <Pill>Архив</Pill>}</div>}
+    {person && <div className="mb-4 flex gap-2" role="tablist" aria-label="Разделы карточки"><Button type="button" role="tab" aria-selected={tab === "card"} variant={tab === "card" ? "default" : "outline"} onClick={() => setTab("card")}>Карточка</Button><Button type="button" role="tab" aria-selected={tab === "feedback"} variant={tab === "feedback" ? "default" : "outline"} onClick={() => setTab("feedback")}>Обратная связь</Button></div>}
+    {person && tab === "feedback" && <FeedbackPanel employeeId={person.id} employeeName={person.name} />}
+    <div hidden={tab !== "card"}>
     {!org.schemaReady && <p className="mb-4 rounded-lg border bg-muted p-3 text-sm">{schemaNotice}</p>}
     {person?.gena_id && <div className="mb-4 rounded-lg border p-3 text-sm"><p>ID в Гене: {person.gena_id}</p><p>Отдел в источнике: {person.gena_source?.department || "—"}</p><p>Команда в источнике: {person.gena_source?.team || "—"}</p><p>Должность в источнике: {person.gena_source?.positions || "—"}</p><p className="text-muted-foreground">Проверьте отдел, команду, категорию и статус. Дата создания аккаунта не является датой выхода.</p></div>}
     <form onSubmit={save} className="grid gap-3 sm:grid-cols-2">
@@ -85,7 +91,6 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
       <label className="text-sm">Руководитель<select name="manager_employee_id" className={`${selectCls} block w-full`} defaultValue={person?.manager_employee_id ?? ""}><option value="">Не указан</option>{org.people.filter((p) => p.id !== person?.id && (!p.archived || p.id === person?.manager_employee_id)).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
       <label className="text-sm">Ответственный HR<select name="hr_owner_id" className={`${selectCls} block w-full`} defaultValue={person?.hr_owner_id ?? ""}><option value="">Не указан</option>{org.hrOperators.map((p) => <option key={p.id} value={p.id}>{p.display_name || "HR без имени"}</option>)}</select></label>
       {org.companyReady && <label className="text-sm">Категория персонала<select name="personnel_type" required className={`${selectCls} block w-full`} defaultValue={person?.personnel_type ?? ""}><option value="">Выберите категорию</option>{Object.entries(personnelLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}</select><span className="text-xs text-muted-foreground">Сотрудники — без тренеров и подрядчиков</span></label>}
-      <label className="text-sm">Дополнительная группа<select name="category_id" className={`${selectCls} block w-full`} defaultValue={person?.category_id ?? ""}><option value="">Не выбрана</option>{org.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
       <label className="text-sm">Дата выхода<Input name="start_date" type="date" defaultValue={person?.start_date ?? ""} /></label>
       <label className="text-sm">Если дата выхода неизвестна: работает сейчас?<select name="currently_working" className={`${selectCls} block w-full`} defaultValue={person?.currently_working === true ? "yes" : person?.currently_working === false ? "no" : ""}><option value="">Неизвестно</option><option value="yes">Да, работает</option><option value="no">Нет, не работает</option></select></label>
       <label className="text-sm">Окончание испытательного срока<Input name="probation_end_date" type="date" defaultValue={person?.probation_end_date ?? ""} /></label>
@@ -101,6 +106,7 @@ export function EmployeeCard({ org, person, onClose }: { org: Org; person: Perso
     </form>
     {person && org.schemaReady && <PersonExtras org={org} person={person} refresh={refresh} />}
     {person && <History org={org} person={person} />}
+    </div>
   </aside></div>;
 }
 
